@@ -96,6 +96,13 @@ async def analyst_node(state: dict[str, Any], tools: list) -> dict[str, Any]:
     
     # Debug: check what we got
     candles_5m_raw = data.get("candles_5m", "")
+    print(f"[Analyst v2] DEBUG: candles_5m_raw type: {type(candles_5m_raw)}")
+    print(f"[Analyst v2] DEBUG: candles_5m_raw len: {len(candles_5m_raw) if hasattr(candles_5m_raw, '__len__') else 'N/A'}")
+    if isinstance(candles_5m_raw, str):
+        print(f"[Analyst v2] DEBUG: candles_5m_raw preview: {candles_5m_raw[:100]}...")
+    elif isinstance(candles_5m_raw, list) and len(candles_5m_raw) > 0:
+         print(f"[Analyst v2] DEBUG: Last candle: {candles_5m_raw[-1]}")
+    
     candles_1h_raw = data.get("candles_1h", "")
     candles_4h_raw = data.get("candles_4h", "")
     candles_1d_raw = data.get("candles_1d", "")
@@ -105,18 +112,29 @@ async def analyst_node(state: dict[str, Any], tools: list) -> dict[str, Any]:
     current_close = 0.0
     try:
         import json as _json
+        
+        # Helper to extract dict from various formats
+        def _extract_candle(c):
+            if isinstance(c, dict):
+                if "text" in c: # MCP TextContent
+                    try: return _json.loads(c["text"])
+                    except: return {}
+                return c
+            elif isinstance(c, str):
+                try: return _json.loads(c)
+                except: return {}
+            return {}
+
         if isinstance(candles_5m_raw, str) and candles_5m_raw.startswith('['):
             candles_list = _json.loads(candles_5m_raw)
-            if candles_list and len(candles_list) > 0:
-                last_candle = candles_list[-1]
-                # Handle potential nested structure
-                if isinstance(last_candle, dict) and "text" in last_candle:
-                    last_candle = _json.loads(last_candle["text"])
+            if candles_list:
+                last_candle = _extract_candle(candles_list[-1])
                 current_close = float(last_candle.get("c", 0))
+                
         elif isinstance(candles_5m_raw, list) and len(candles_5m_raw) > 0:
-            last_candle = candles_5m_raw[-1]
-            if isinstance(last_candle, dict):
-                current_close = float(last_candle.get("c", 0))
+            last_candle = _extract_candle(candles_5m_raw[-1])
+            current_close = float(last_candle.get("c", 0))
+            
     except Exception as price_err:
         print(f"[Analyst v2] Price extraction error: {price_err}")
     
