@@ -1,0 +1,24 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Dependencies
+COPY agent/requirements.txt ./requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy Codebase
+COPY agent ./agent
+COPY ui ./ui
+
+# Set Python Path to include /app so imports work
+ENV PYTHONPATH="${PYTHONPATH}:/app"
+ENV PYTHONUNBUFFERED=1
+
+# Default Command (Agent)
+CMD ["python", "-m", "agent.main"]

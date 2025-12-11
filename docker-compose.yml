@@ -1,0 +1,67 @@
+version: '3.8'
+
+services:
+  # ---------------------------------------------------------------------------
+  # 1. MCP Server - Connects to Hyperliquid
+  # ---------------------------------------------------------------------------
+  mcp-server:
+    build:
+      context: ./deployment-test
+      dockerfile: Dockerfile
+    command: python server.py --transport sse --port 8000
+    ports:
+      - "127.0.0.1:8000:8000" # Localhost only for security
+    env_file:
+      - .env
+    restart: always
+    networks:
+      - agent-network
+
+  # ---------------------------------------------------------------------------
+  # 2. Trading Agent - Analyzes market and executes trades
+  # ---------------------------------------------------------------------------
+  agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+    command: python -m agent.main
+    env_file:
+      - .env
+    environment:
+      - MCP_SERVER_URL=http://mcp-server:8000/sse
+      - DATABASE_URL=sqlite:////data/agent.db
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - agent_data:/data
+    restart: always
+    depends_on:
+      - mcp-server
+    networks:
+      - agent-network
+
+  # ---------------------------------------------------------------------------
+  # 3. Dashboard - UI for monitoring
+  # ---------------------------------------------------------------------------
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+    command: streamlit run ui/dashboard.py --server.port 8501 --server.address 0.0.0.0
+    ports:
+      - "8501:8501"
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=sqlite:////data/agent.db
+    volumes:
+      - agent_data:/data
+    restart: always
+    networks:
+      - agent-network
+
+volumes:
+  agent_data:
+
+networks:
+  agent-network:
+    driver: bridge
