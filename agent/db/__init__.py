@@ -11,6 +11,15 @@ from .repository import (
     ApprovalRepository,
     MarketMemoryRepository
 )
+from .dspy_memory import (
+    init_dspy_db,
+    get_dspy_session,
+    ShadowTrade,
+    ShadowAccountState,
+    ShadowStats,
+    OptimizationExample,
+    DSPyRepository
+)
 
 __all__ = [
     # Models
@@ -32,5 +41,14 @@ __all__ = [
     "InferenceLogRepository",
     "InferenceLogRepository",
     "ApprovalRepository",
-    "MarketMemoryRepository"
+    "MarketMemoryRepository",
+    # DSPy Memory
+    "init_dspy_db",
+    "get_dspy_session",
+    "ShadowTrade",
+    "ShadowAccountState",
+    "ShadowStats",
+    "OptimizationExample",
+    "DSPyRepository"
 ]
+
