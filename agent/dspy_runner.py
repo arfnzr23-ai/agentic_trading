@@ -6,6 +6,9 @@ from .db.dspy_memory import init_dspy_db, DSPyRepository, ShadowTrade
 # Flag to ensure DB is initialized only once
 _DB_INITIALIZED = False
 
+# Fee rate for Hyperliquid (maker/taker average)
+SIMULATED_FEE_RATE = 0.0003  # 0.03% per trade (entry + exit = ~0.06%)
+
 async def run_shadow_cycle(state: dict[str, Any], tools: list):
     """
     Main entry point for the DSPy Shadow Mode.
@@ -27,11 +30,10 @@ async def run_shadow_cycle(state: dict[str, Any], tools: list):
     print("[Shadow Mode] Cycle started (Async)")
     
     # Extract Immutable Data needed for analysis
-    # NOTE: We do NOT fetch new data. We use what the legacy agent fetched.
     market_data = state.get("market_data_snapshot", {}) 
-    # TODO: In Phase D, ensure main.py populates 'market_data_snapshot'
+    account_state = state.get("account_state", {})
+    account_equity = float(account_state.get("equity", 0))
     
-    # --- EXECUTION ---
     # --- EXECUTION ---
     try:
         from .dspy.modules import ShadowTrader
@@ -63,7 +65,7 @@ async def run_shadow_cycle(state: dict[str, Any], tools: list):
         try:
             from .dspy.simulator import ShadowSimulator
             current_price = market_data.get("close", 0)
-            coin = market_data.get("coin", "BTC") # Default if missing
+            coin = market_data.get("coin", "BTC")
             if current_price > 0:
                 await ShadowSimulator.update_open_trades(current_price, coin)
         except Exception as sim_error:
@@ -71,7 +73,6 @@ async def run_shadow_cycle(state: dict[str, Any], tools: list):
 
         # --- INFERENCE STEP ---
         
-        # Extract inputs (Mocking custom inputs for now as legacy agent doesn't have them yet)
         if not market_data:
              print("[Shadow Mode] Market data empty, skipping inference.")
              return
@@ -79,9 +80,9 @@ async def run_shadow_cycle(state: dict[str, Any], tools: list):
         inputs = {
             "market_structure": str(market_data.get("candles_1h", "Neutral structure")),
             "risk_environment": str(market_data.get("market_context", "Normal")),
-            "social_sentiment": 50.0, # Placeholder default
-            "whale_activity": "Normal flow", # Placeholder default
-            "macro_context": "No major events" # Placeholder default
+            "social_sentiment": 50.0,
+            "whale_activity": "Normal flow",
+            "macro_context": "No major events"
         }
         
         # Run Inference with Assertions
@@ -90,15 +91,25 @@ async def run_shadow_cycle(state: dict[str, Any], tools: list):
         
         signal = prediction.plan
         
+        # Extract reasoning from DSPy output
+        reasoning = getattr(signal, 'reasoning', None) or "No reasoning provided"
+        
+        # Calculate position size based on equity (match legacy agent sizing)
+        leverage = 20
+        size_usd = min(account_equity * 0.9 * leverage, 1000.0) if account_equity > 0 else 1000.0
+        
         print(f"[Shadow Mode] RESULT: {signal.signal} ({signal.confidence:.0%}) - {signal.coin}")
+        print(f"[Shadow Mode] Reasoning: {reasoning[:100]}...")
         
         trade_record = ShadowTrade(
             coin=signal.coin,
             signal=signal.signal,
             confidence=signal.confidence,
+            reasoning=reasoning,
             entry_price=signal.entry_price if signal.entry_price else market_data.get("close", 0),
-            size_usd=1000.0, # Default paper size
-            leverage=20,
+            size_usd=size_usd,
+            leverage=leverage,
+            account_equity=account_equity,
             stop_loss=signal.stop_loss,
             take_profit=signal.take_profit,
             market_context_hash=str(hash(str(inputs))),
@@ -108,17 +119,20 @@ async def run_shadow_cycle(state: dict[str, Any], tools: list):
         DSPyRepository.save_trade(trade_record)
         print(f"[Shadow Mode] Saved trade to memory (ID: {trade_record.id})")
         
-        # --- NOTIFICATION ---
+        # --- NOTIFICATION WITH ALL TRACKABLE PARAMETERS ---
         await notify_shadow_trade_opened(
             coin=trade_record.coin,
             signal=trade_record.signal,
             confidence=trade_record.confidence,
             entry_price=trade_record.entry_price,
             stop_loss=trade_record.stop_loss,
-            take_profit=trade_record.take_profit
+            take_profit=trade_record.take_profit,
+            reasoning=trade_record.reasoning,
+            account_equity=trade_record.account_equity
         )
         
     except Exception as e:
         print(f"[Shadow Mode] EXECUTION ERROR: {e}")
         import traceback
         traceback.print_exc()
+

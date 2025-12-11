@@ -316,9 +316,11 @@ async def notify_shadow_trade_opened(
     confidence: float,
     entry_price: float,
     stop_loss: Optional[float] = None,
-    take_profit: Optional[float] = None
+    take_profit: Optional[float] = None,
+    reasoning: Optional[str] = None,
+    account_equity: Optional[float] = None
 ):
-    """Send Shadow Mode trade open notification."""
+    """Send Shadow Mode trade open notification with reasoning."""
     if not is_enabled():
         return
 
@@ -334,6 +336,12 @@ Entry: `${entry_price:,.2f}`"""
         start_msg += f"\nSL: `${stop_loss:,.2f}`"
     if take_profit:
         start_msg += f"\nTP: `${take_profit:,.2f}`"
+    if account_equity:
+        start_msg += f"\nEquity: `${account_equity:,.2f}`"
+    if reasoning:
+        # Truncate reasoning for Telegram
+        short_reason = reasoning[:200] + "..." if len(reasoning) > 200 else reasoning
+        start_msg += f"\n\n📝 *Reasoning:*\n_{short_reason}_"
         
     await send_message(start_msg)
 
@@ -345,20 +353,33 @@ async def notify_shadow_trade_closed(
     exit_price: float,
     pnl_usd: float,
     pnl_pct: float,
-    reason: str
+    fees_usd: float,
+    reason: str,
+    cumulative_pnl: Optional[float] = None,
+    win_rate: Optional[float] = None
 ):
-    """Send Shadow Mode trade close notification."""
+    """Send Shadow Mode trade close notification with fees and cumulative stats."""
     if not is_enabled():
         return
 
     emoji = "👻"
     profit_emoji = "✅" if pnl_usd >= 0 else "❌"
     
+    net_pnl = pnl_usd - fees_usd
+    
     msg = f"""{emoji} *SHADOW TRADE CLOSED*
     
 {profit_emoji} *{coin} {signal}*
 Entry: `${entry_price:,.2f}` → Exit: `${exit_price:,.2f}`
-PnL: `${pnl_usd:+.2f}` ({pnl_pct:+.1f}%)
+Gross PnL: `${pnl_usd:+.2f}` ({pnl_pct:+.1f}%)
+Fees: `-${fees_usd:.2f}`
+Net PnL: `${net_pnl:+.2f}`
 Outcome: *{reason}*"""
 
+    if cumulative_pnl is not None:
+        msg += f"\n\n📊 *Cumulative:* `${cumulative_pnl:+.2f}`"
+        if win_rate is not None:
+            msg += f" | Win Rate: `{win_rate:.1f}%`"
+
     await send_message(msg)
+
