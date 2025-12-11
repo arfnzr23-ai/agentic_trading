@@ -1,0 +1,11 @@
+# Environment files with sensitive API keys
+.env
+*.env
+
+# Database
+*.db
+*.sqlite
+
+# Python cache
+__pycache__/
+*.pyc

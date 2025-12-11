@@ -1,0 +1,15 @@
+[project]
+name = "hyperliquid-mcp"
+version = "0.1.0"
+description = "Hyperliquid MCP Server"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "hyperliquid-python-sdk",
+    "mcp",
+    "python-dotenv",
+    "eth-account"
+]
+
+[tool.uv]
+# UV configuration if needed

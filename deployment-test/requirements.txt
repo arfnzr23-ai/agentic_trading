@@ -1,0 +1,11 @@
+# Hyperliquid SDK (Official)
+hyperliquid-python-sdk
+
+# Model Context Protocol SDK (Official)
+mcp
+
+# Environment Variables
+python-dotenv
+
+# Ethereum Account Management (Required for signing)
+eth-account
