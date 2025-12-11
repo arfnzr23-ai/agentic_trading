@@ -17,6 +17,71 @@ class ShadowSimulator:
     """
     
     @staticmethod
+    async def _process_trade_closure(session, trade, exit_price, reason):
+        """Internal helper to calculate PnL, update DB, and notify."""
+        lev = trade.leverage or 1
+        size = trade.size_usd or 1000
+        entry = trade.entry_price
+        
+        if entry > 0:
+            if trade.signal == "LONG":
+                raw_pnl_pct = (exit_price - entry) / entry
+            else:
+                raw_pnl_pct = (entry - exit_price) / entry
+                
+            gross_pnl_usd = raw_pnl_pct * size * lev
+            pnl_percent = raw_pnl_pct * lev * 100
+            
+            # Calculate fees (entry + exit)
+            fees_usd = size * SIMULATED_FEE_RATE * 2
+            # Calculate slippage (entry + exit)
+            slippage_usd = size * SIMULATED_SLIPPAGE_RATE * 2
+            
+            net_pnl_usd = gross_pnl_usd - fees_usd - slippage_usd
+            is_winner = net_pnl_usd > 0
+            
+            # Update Trade Record
+            trade.exit_price = exit_price
+            trade.pnl_usd = round(net_pnl_usd, 2)
+            trade.pnl_percent = round(pnl_percent, 2)
+            trade.fees_usd = round(fees_usd, 2)
+            trade.slippage_usd = round(slippage_usd, 2)
+            
+            duration = (datetime.utcnow() - trade.timestamp).total_seconds() / 60
+            trade.duration_minutes = round(duration, 1)
+            
+            session.add(trade)
+            session.commit()  # Commit trade first
+            
+            # Update Shadow Account State (independent equity tracking)
+            DSPyRepository.update_account_after_trade(
+                pnl=gross_pnl_usd,
+                fees=fees_usd,
+                slippage=slippage_usd,
+                is_winner=is_winner
+            )
+            
+            # Get cumulative stats for notification
+            stats = DSPyRepository.get_cumulative_stats()
+            
+            print(f"[Shadow Mode] Closed Trade {trade.id} ({reason}): Net ${net_pnl_usd:.2f}")
+            print(f"[Shadow Mode] Shadow Equity: ${stats.current_equity:.2f} ({stats.equity_change_pct:+.1f}%)")
+            
+            # NOTIFICATION WITH ALL STATS
+            await notify_shadow_trade_closed(
+                coin=trade.coin,
+                signal=trade.signal,
+                entry_price=trade.entry_price,
+                exit_price=exit_price,
+                pnl_usd=gross_pnl_usd,
+                pnl_pct=pnl_percent,
+                fees_usd=fees_usd + slippage_usd,  # Combined costs
+                reason=reason,
+                cumulative_pnl=stats.cumulative_pnl,
+                win_rate=stats.win_rate
+            )
+
+    @staticmethod
     async def update_open_trades(current_price: float, coin: str):
         """
         Check all OPEN shadow trades for this coin and close them if TP/SL hit.
@@ -58,68 +123,22 @@ class ShadowSimulator:
                 
                 # If exited
                 if exit_price:
-                    # Calculate PnL
-                    lev = trade.leverage or 1
-                    size = trade.size_usd or 1000
-                    entry = trade.entry_price
-                    
-                    if entry > 0:
-                        if trade.signal == "LONG":
-                            raw_pnl_pct = (exit_price - entry) / entry
-                        else:
-                            raw_pnl_pct = (entry - exit_price) / entry
-                            
-                        gross_pnl_usd = raw_pnl_pct * size * lev
-                        pnl_percent = raw_pnl_pct * lev * 100
-                        
-                        # Calculate fees (entry + exit)
-                        fees_usd = size * SIMULATED_FEE_RATE * 2
-                        # Calculate slippage (entry + exit)
-                        slippage_usd = size * SIMULATED_SLIPPAGE_RATE * 2
-                        
-                        net_pnl_usd = gross_pnl_usd - fees_usd - slippage_usd
-                        is_winner = net_pnl_usd > 0
-                        
-                        # Update Trade Record
-                        trade.exit_price = exit_price
-                        trade.pnl_usd = round(net_pnl_usd, 2)
-                        trade.pnl_percent = round(pnl_percent, 2)
-                        trade.fees_usd = round(fees_usd, 2)
-                        trade.slippage_usd = round(slippage_usd, 2)
-                        
-                        duration = (datetime.utcnow() - trade.timestamp).total_seconds() / 60
-                        trade.duration_minutes = round(duration, 1)
-                        
-                        session.add(trade)
-                        session.commit()  # Commit trade first
-                        
-                        # Update Shadow Account State (independent equity tracking)
-                        DSPyRepository.update_account_after_trade(
-                            pnl=gross_pnl_usd,
-                            fees=fees_usd,
-                            slippage=slippage_usd,
-                            is_winner=is_winner
-                        )
-                        
-                        # Get cumulative stats for notification
-                        stats = DSPyRepository.get_cumulative_stats()
-                        
-                        print(f"[Shadow Mode] Closed Trade {trade.id} ({reason}): Net ${net_pnl_usd:.2f}")
-                        print(f"[Shadow Mode] Shadow Equity: ${stats.current_equity:.2f} ({stats.equity_change_pct:+.1f}%)")
-                        
-                        # NOTIFICATION WITH ALL STATS
-                        await notify_shadow_trade_closed(
-                            coin=trade.coin,
-                            signal=trade.signal,
-                            entry_price=trade.entry_price,
-                            exit_price=exit_price,
-                            pnl_usd=gross_pnl_usd,
-                            pnl_pct=pnl_percent,
-                            fees_usd=fees_usd + slippage_usd,  # Combined costs
-                            reason=reason,
-                            cumulative_pnl=stats.cumulative_pnl,
-                            win_rate=stats.win_rate
-                        )
+                    await ShadowSimulator._process_trade_closure(session, trade, exit_price, reason)
+            
+            session.commit()
+
+    @staticmethod
+    async def close_all_positions(coin: str, current_price: float, reason: str = "MANUAL_SIGNAL"):
+        """Force close all open positions for a coin (e.g. from CLOSE signal)."""
+        if current_price <= 0:
+            return
+
+        with get_dspy_session() as session:
+            statement = select(ShadowTrade).where(ShadowTrade.coin == coin).where(ShadowTrade.pnl_usd == None)
+            open_trades = session.exec(statement).all()
+            
+            for trade in open_trades:
+                await ShadowSimulator._process_trade_closure(session, trade, current_price, reason)
             
             session.commit()
 

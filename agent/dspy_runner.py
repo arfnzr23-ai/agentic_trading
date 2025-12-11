@@ -98,6 +98,14 @@ async def run_shadow_cycle(state: dict[str, Any], tools: list):
         # Extract reasoning from DSPy output
         reasoning = getattr(signal, 'reasoning', None) or "No reasoning provided"
         
+        if signal.signal in ["CLOSE", "CUT_LOSS"]:
+             print(f"[Shadow Mode] ACTION: Closing all {signal.coin} positions (Reason: {reasoning})")
+             from .dspy.simulator import ShadowSimulator
+             current_price = market_data.get("close", 0)
+             if current_price > 0:
+                 await ShadowSimulator.close_all_positions(signal.coin, current_price, reason=signal.signal)
+             return  # Stop here, do not create a new trade record for "opening" a close
+        
         # Calculate position size based on SHADOW equity (independent from exchange)
         leverage = 20
         size_usd = min(shadow_equity * 0.9 * leverage, 1000.0) if shadow_equity > 0 else 1000.0
@@ -106,6 +114,10 @@ async def run_shadow_cycle(state: dict[str, Any], tools: list):
         print(f"[Shadow Mode] Shadow Equity: ${shadow_equity:.2f} | Size: ${size_usd:.2f}")
         print(f"[Shadow Mode] Reasoning: {reasoning[:100]}...")
         
+        if signal.signal == "HOLD":
+             # Optional: Log HOLDs but don't notify or save trade
+             return
+
         trade_record = ShadowTrade(
             coin=signal.coin,
             signal=signal.signal,
