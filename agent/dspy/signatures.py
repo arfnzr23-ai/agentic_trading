@@ -19,6 +19,10 @@ class StrategicAnalysis(dspy.Signature):
     whale_activity: str = dspy.InputField(desc="Summary of large holder flows and significant on-chain movements")
     macro_context: str = dspy.InputField(desc="Upcoming economic events (FOMC, CPI) and their timing")
     
+    # --- MEMORY & CONTEXT ---
+    account_context: str = dspy.InputField(desc="Current equity, open positions, and exposure")
+    last_trade_outcome: str = dspy.InputField(desc="Outcome of the most recent closed trade for context")
+    
     # --- OUTPUT ---
     # TypedPredictor will automatically enforce the TradeSignal Pydantic schema
     plan: TradeSignal = dspy.OutputField(desc="Executable trading plan. Prefer ACTION over HOLD.")

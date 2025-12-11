@@ -81,12 +81,44 @@ async def run_shadow_cycle(state: dict[str, Any], tools: list):
              print("[Shadow Mode] Market data empty, skipping inference.")
              return
              
+        # Context Injection: Get Shadow State
+        from sqlmodel import select
+        from .db.dspy_memory import get_dspy_session, ShadowTrade
+        
+        # 1. Get Open Positions details
+        with get_dspy_session() as session:
+            open_trades = session.exec(
+                select(ShadowTrade).where(ShadowTrade.pnl_usd == None)
+            ).all()
+            
+            # Format open positions for LLM
+            if open_trades:
+                pos_details = ", ".join([f"{t.coin} ({t.signal} @ ${t.entry_price:.2f})" for t in open_trades])
+                open_context = f"OPEN POSITIONS ({len(open_trades)}): {pos_details}"
+            else:
+                open_context = "NO OPEN POSITIONS."
+                
+            # 2. Get Last Closed Trade
+            last_trade = session.exec(
+                select(ShadowTrade)
+                .where(ShadowTrade.pnl_usd != None)
+                .order_by(ShadowTrade.timestamp.desc())
+            ).first()
+            
+            if last_trade:
+                outcome = "WIN" if last_trade.pnl_usd > 0 else "LOSS"
+                trade_history = f"LAST TRADE: {last_trade.coin} {last_trade.signal} -> {outcome} (${last_trade.pnl_usd:+.2f})"
+            else:
+                trade_history = "NO TRADE HISTORY."
+
         inputs = {
             "market_structure": str(market_data.get("candles_1h", "Neutral structure")),
             "risk_environment": str(market_data.get("market_context", "Normal")),
             "social_sentiment": 50.0,
             "whale_activity": "Normal flow",
-            "macro_context": "No major events"
+            "macro_context": "No major events",
+            "account_context": f"Shadow Equity: ${shadow_equity:.2f} | {open_context}",
+            "last_trade_outcome": trade_history
         }
         
         # Run Inference with Assertions
