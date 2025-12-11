@@ -100,6 +100,31 @@ async def analyst_node(state: dict[str, Any], tools: list) -> dict[str, Any]:
     candles_4h_raw = data.get("candles_4h", "")
     candles_1d_raw = data.get("candles_1d", "")
     
+    # === ENRICH DATA FOR SHADOW MODE ===
+    # Extract current close price from most recent 5m candle
+    current_close = 0.0
+    try:
+        import json as _json
+        if isinstance(candles_5m_raw, str) and candles_5m_raw.startswith('['):
+            candles_list = _json.loads(candles_5m_raw)
+            if candles_list and len(candles_list) > 0:
+                last_candle = candles_list[-1]
+                # Handle potential nested structure
+                if isinstance(last_candle, dict) and "text" in last_candle:
+                    last_candle = _json.loads(last_candle["text"])
+                current_close = float(last_candle.get("c", 0))
+        elif isinstance(candles_5m_raw, list) and len(candles_5m_raw) > 0:
+            last_candle = candles_5m_raw[-1]
+            if isinstance(last_candle, dict):
+                current_close = float(last_candle.get("c", 0))
+    except Exception as price_err:
+        print(f"[Analyst v2] Price extraction error: {price_err}")
+    
+    # Add derived fields for Shadow Mode
+    data["coin"] = target_coin
+    data["close"] = current_close
+    print(f"[Analyst v2] Current {target_coin} price: ${current_close:,.2f}")
+    
     # Summarize candle data (show more candles for better analysis)
     candles_5m_summary = summarize_candles(candles_5m_raw, max_candles=15)
     candles_1h_summary = summarize_candles(candles_1h_raw, max_candles=24)
