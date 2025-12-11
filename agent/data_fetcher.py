@@ -130,6 +130,9 @@ def summarize_candles(candles_json: str, max_candles: int = 10) -> str:
             
         # Parse candles (handle both string and dict formats)
         parsed = []
+        if candles:
+             print(f"[DEBUG] First candle sample: {candles[0]}") # DEBUG
+             
         for c in candles[-max_candles:]:
             if isinstance(c, str):
                 try:
