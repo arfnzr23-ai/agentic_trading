@@ -63,6 +63,32 @@ This method runs the MCP Server, the Trading Agent, and the Dashboard as managed
 - Stop dashboard only: `docker compose --profile dashboard stop`
 - Update: `git pull && docker compose up -d --build`
 
+### Monitoring & Debugging (Live State)
+
+To see verbose information about the state of your containers live on the VPS:
+
+1.  **View Live Logs** (Stream logs from all services):
+
+    ```bash
+    docker compose logs -f
+    ```
+
+    - To view a specific service (e.g., just the agent):
+      ```bash
+      docker compose logs -f agent
+      ```
+
+2.  **Check Process Status**:
+
+    ```bash
+    docker compose ps
+    ```
+
+3.  **View Resource Usage** (CPU/Memory):
+    ```bash
+    docker stats
+    ```
+
 ---
 
 ## Option 2: One-Click VPS Script (Simple)

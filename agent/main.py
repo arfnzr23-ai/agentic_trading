@@ -169,8 +169,16 @@ async def main_loop():
     
     # New API: no context manager
     mcp_client = MultiServerMCPClient(mcp_config)
-    tools = await mcp_client.get_tools()
-    print(f"[INIT] Connected! {len(tools)} tools available.")
+    
+    # Retry logic for initial connection
+    tools = None
+    while tools is None:
+        try:
+            tools = await mcp_client.get_tools()
+            print(f"[INIT] Connected! {len(tools)} tools available.")
+        except Exception as e:
+            print(f"[INIT] Connection failed: {e}. Retrying in 5s...")
+            await asyncio.sleep(5)
     
     # List some tools
     tool_names = [t.name for t in tools[:5]]
