@@ -130,21 +130,33 @@ def summarize_candles(candles_json: str, max_candles: int = 10) -> str:
             
         # Parse candles (handle both string and dict formats)
         parsed = []
-        if candles:
-             print(f"[DEBUG] First candle sample: {candles[0]}") # DEBUG
-             
+            
         for c in candles[-max_candles:]:
-            if isinstance(c, str):
+            # Handle MCP/LangChain TextContent objects (dict with 'text' field)
+            if isinstance(c, dict) and "text" in c and isinstance(c.get("text"), str):
                 try:
+                    import json
+                    c = json.loads(c["text"])
+                except:
+                    continue
+            # Handle stringified JSON
+            elif isinstance(c, str):
+                try:
+                    import json
                     c = json.loads(c)
                 except:
                     continue
-            parsed.append({
-                "o": float(c.get("o", 0)),
-                "h": float(c.get("h", 0)),
-                "l": float(c.get("l", 0)),
-                "c": float(c.get("c", 0))
-            })
+            
+            # Extract data
+            try:
+                parsed.append({
+                    "o": float(c.get("o", 0)),
+                    "h": float(c.get("h", 0)),
+                    "l": float(c.get("l", 0)),
+                    "c": float(c.get("c", 0))
+                })
+            except:
+                continue
         
         if not parsed:
             return "Could not parse candle data."

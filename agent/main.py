@@ -36,7 +36,15 @@ async def get_account_state(tools: list) -> dict:
     try:
         # Fetch raw state
         raw_state = await info_tool.ainvoke({})
-        if isinstance(raw_state, str):
+        
+        # Parse MCP/LangChain wrapped content
+        if isinstance(raw_state, list) and len(raw_state) > 0 and isinstance(raw_state[0], dict) and "text" in raw_state[0]:
+             try:
+                 import json
+                 raw_state = json.loads(raw_state[0]["text"])
+             except:
+                 pass
+        elif isinstance(raw_state, str):
             import json
             raw_state = json.loads(raw_state)
             
