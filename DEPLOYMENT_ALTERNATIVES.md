@@ -64,7 +64,25 @@ This method runs the MCP Server, the Trading Agent (including Shadow Simulator),
 
 - Stop core services: `docker compose down`
 - Stop dashboard only: `docker compose --profile dashboard stop`
-- Update: `git pull && docker compose up -d --build`
+- Update (Main Branch): `git pull && docker compose up -d --build`
+
+### Deploying a Specific Feature Branch
+
+To deploy the **Shadow Mode** branch (`feat/dspy-shadow-mode`):
+
+```bash
+# 1. Fetch latest branches
+git fetch origin
+
+# 2. Switch to the feature branch
+git checkout feat/dspy-shadow-mode
+
+# 3. Pull latest changes
+git pull origin feat/dspy-shadow-mode
+
+# 4. Rebuild and restart containers
+docker compose up -d --build
+```
 
 ### Monitoring & Debugging (Live State)
 
