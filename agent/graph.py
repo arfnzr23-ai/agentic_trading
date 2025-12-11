@@ -43,6 +43,10 @@ class AgentState(TypedDict, total=False):
     
     # MCP tools reference
     tools: list
+    
+    # Shadow Mode Data
+    market_data_snapshot: dict
+    memory_context: str
 
 
 async def create_agent_graph(mcp_client: MultiServerMCPClient) -> StateGraph:
@@ -131,6 +135,7 @@ async def run_sequential_cycle(mcp_client: MultiServerMCPClient, initial_state: 
         "analyst_signal": analyst_result.get("analyst_signal"),
         "analyst_response": analyst_result.get("analyst_response"),
         "memory_context": analyst_result.get("memory_context"),  # Pass learning to Risk
+        "market_data_snapshot": analyst_result.get("market_data_snapshot"), # Pass data to Shadow Runner
     }
     
     # 3. Run Risk (now seeing the signal)
