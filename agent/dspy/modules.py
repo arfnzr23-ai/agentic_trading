@@ -58,32 +58,32 @@ class ShadowTrader(dspy.Module):
 
         # These rules guide the agent to self-correct if it violates them.
         
-        # Rule 1: High Confidence Validation
-        # If confidence is high (>60%), we MUST have specific entry/exit plans
-        if pred.plan.confidence > 0.6:
+        # Rule 1: Confidence Validation (Loosened for Shadow Mode)
+        # If confidence is > 50%, we should have a plan.
+        if pred.plan.confidence > 0.5:
             Suggest(
                 pred.plan.entry_price is not None and pred.plan.entry_price > 0,
-                "High confidence requires a specific numeric Entry Price."
+                "Confidence > 50% implies a setup found. Define Entry Price."
             )
             Suggest(
-                pred.plan.stop_loss is not None and pred.plan.stop_loss > 0,
-                "High confidence trades MUST have a defined Stop Loss."
+                pred.plan.stop_loss is not None,
+                "Trades must have a Stop Loss."
             )
             
-        # Rule 2: Bear Trend Safety
-        # If the risk environment indicates a Down Trend, discourage weak Longs
+        # Rule 2: Bear Trend Safety (Moderated)
+        # Allow counter-trend if conviction exists (>65%)
         if "BEAR" in risk_environment.upper() or "DOWN" in risk_environment.upper():
              Suggest(
-                not (pred.plan.signal == "LONG" and pred.plan.confidence < 0.8),
-                "In Bear Trends, avoid Longs unless conviction is extremely high (>80%). Consider HOLD or SHORT."
+                not (pred.plan.signal == "LONG" and pred.plan.confidence < 0.65),
+                "Counter-trend Longs require higher conviction (>65%)."
              )
              
-        # Rule 3: Volatility Filter
-        # If sentiment is extreme fear (<20) andvolatility is high, prefer HOLD
+        # Rule 3: Volatility Filter (Removed strict HOLD enforcement)
+        # Instead of forcing HOLD, suggest wider stops
         if social_sentiment < 20 and "HIGH_VOLATILITY" in risk_environment:
             Suggest(
-                pred.plan.signal == "HOLD",
-                "Extreme Fear + High Volatility = unpredictable. Prefer HOLD until structure stabilizes."
+                pred.plan.stop_loss is not None,
+                "High volatility requires defined risk parameters (Stop Loss)."
             )
             
         return pred

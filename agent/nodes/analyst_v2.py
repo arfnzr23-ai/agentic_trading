@@ -170,16 +170,18 @@ Your trade thesis is in THOUGHT CONTINUITY below - REVIEW IT before deciding.
 """
     elif account_equity < 50.0:
         mode_prompt = """
-*** LADDER MODE (Equity < $50) - SEEKING ENTRY ***
-- Confidence threshold: 60%+ required for entry
+*** LADDER MODE (Equity < $50) - AGGRESSIVE RECOVERY ***
+- Confidence threshold: 50% required for entry (Calculated Risk)
 - Sizing: MAX (90% equity × 40x)
-- PATIENCE: Wait for clear setups, one good trade > many small trades eaten by fees
-- Favor: Momentum plays, aligned HTF"""
+- AGGRESSIVENESS: High. You cannot afford to wait for "perfect" setups that never come.
+- Favor: Momentum plays, scalp setups, quick flips."""
     else:
         mode_prompt = """
-*** STANDARD MODE - SEEKING ENTRY ***
-- Confidence threshold: 60%+ required for entry
-- Favor: Well-defined structure with clear invalidation"""
+*** STANDARD MODE - GROWTH FOCUSED ***
+- Confidence threshold: 55%+ required for entry
+- ACTION BIAS: Prefer ACTING over HOLDING if Edge > Fees.
+- "Neutral" does NOT mean HOLD. If short-term structure is clear, take it.
+- Do not fear small losses. Fear missing the move."""
     
     # Build structured data context
     data_context = f"""
@@ -225,7 +227,7 @@ ANALYZE:
 1. HTF Alignment: Is 4H and 5M trend aligned?
 2. Structure: HH/HL = Bullish, LH/LL = Bearish, Mixed = Choppy
 3. Funding: Extreme = fade, Neutral = follow structure
-4. {"Position Management: Should we HOLD, add to position, or CLOSE?" if has_open_position else "Entry: Only if aligned + structure confirmed"}
+4. {"Position Management: Should we HOLD, add to position, or CLOSE?" if has_open_position else "Entry: Do we have >55% confidence for a move > 0.3%?"}
 
 OUTPUT JSON:
 ```json

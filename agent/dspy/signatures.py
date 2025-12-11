@@ -7,7 +7,8 @@ from ..models.schemas import TradeSignal, TradeSignal
 class StrategicAnalysis(dspy.Signature):
     """
     Generate a high-conviction trading plan based on multi-timeframe structure.
-    Focus on asymmetric risk/reward opportunities (R:R > 2.0).
+    SHADOW MODE GOAL: Test experimental setups. Be aggressive.
+    Do NOT play it safe. If there is a >40% chance of a move, TAKE IT to gather data.
     """
     # --- STANDARD INPUTS ---
     market_structure: str = dspy.InputField(desc="Multi-timeframe analysis (1D, 4H, 1H) focusing on trend alignment")
@@ -20,4 +21,4 @@ class StrategicAnalysis(dspy.Signature):
     
     # --- OUTPUT ---
     # TypedPredictor will automatically enforce the TradeSignal Pydantic schema
-    plan: TradeSignal = dspy.OutputField(desc="Executable trading plan complying with strict risk rules")
+    plan: TradeSignal = dspy.OutputField(desc="Executable trading plan. Prefer ACTION over HOLD.")
