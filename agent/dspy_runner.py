@@ -124,6 +124,9 @@ async def run_shadow_cycle(state: dict[str, Any], tools: list):
         DSPyRepository.save_trade(trade_record)
         print(f"[Shadow Mode] Saved trade to memory (ID: {trade_record.id})")
         
+        # Get active positions count
+        open_count = DSPyRepository.get_open_position_count()
+        
         # --- NOTIFICATION WITH ALL TRACKABLE PARAMETERS ---
         await notify_shadow_trade_opened(
             coin=trade_record.coin,
@@ -133,7 +136,8 @@ async def run_shadow_cycle(state: dict[str, Any], tools: list):
             stop_loss=trade_record.stop_loss,
             take_profit=trade_record.take_profit,
             reasoning=trade_record.reasoning,
-            account_equity=trade_record.account_equity
+            account_equity=trade_record.account_equity,
+            open_position_count=open_count
         )
         
     except Exception as e:

@@ -137,7 +137,8 @@ async def run_inference_cycle(mcp_client: MultiServerMCPClient, tools: list, cyc
             margin_pct=account_state.get("margin_usage_pct", 0),
             analyst_signal=analyst_signal,
             risk_decision=risk_decision,
-            final_action=action
+            final_action=action,
+            open_position_count=len(account_state.get("open_symbols", []))
         )
     except Exception as tg_err:
         print(f"[Telegram] Notification error: {tg_err}")

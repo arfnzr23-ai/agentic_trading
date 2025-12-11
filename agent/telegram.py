@@ -70,7 +70,8 @@ def format_inference_update(
     margin_pct: float,
     analyst_signal: dict,
     risk_decision: dict,
-    final_action: str
+    final_action: str,
+    open_position_count: int = 0
 ) -> str:
     """
     Format inference update for Telegram.
@@ -101,6 +102,7 @@ def format_inference_update(
 
 💰 *Account*
 Equity: `${equity:.2f}` | Margin: `{margin_pct:.1f}%`
+Open Positions: `{open_position_count}`
 
 {signal_emoji} *Analyst Signal: {signal}* ({conf_pct:.0f}%)"""
     
@@ -141,17 +143,9 @@ Equity: `${equity:.2f}` | Margin: `{margin_pct:.1f}%`
 
 {final_emoji} *Final: {final_action}*"""
     
-    # Full reasoning (up to 500 chars)
+    # Full reasoning (NO truncation for Telegram, limit is 4096)
     reasoning = analyst_signal.get("reasoning", "")
     if reasoning:
-        # Truncate at 500 chars but try to end at a sentence
-        if len(reasoning) > 500:
-            reasoning = reasoning[:500]
-            last_period = reasoning.rfind(".")
-            if last_period > 300:
-                reasoning = reasoning[:last_period + 1]
-            else:
-                reasoning += "..."
         message += f"""
 
 📝 *Reasoning:*
@@ -227,7 +221,8 @@ async def notify_inference(
     margin_pct: float,
     analyst_signal: dict,
     risk_decision: dict,
-    final_action: str
+    final_action: str,
+    open_position_count: int = 0
 ):
     """Send inference update to Telegram."""
     if not is_enabled():
@@ -235,7 +230,8 @@ async def notify_inference(
     
     message = format_inference_update(
         cycle, equity, margin_pct,
-        analyst_signal, risk_decision, final_action
+        analyst_signal, risk_decision, final_action,
+        open_position_count
     )
     await send_message(message)
 
@@ -318,9 +314,10 @@ async def notify_shadow_trade_opened(
     stop_loss: Optional[float] = None,
     take_profit: Optional[float] = None,
     reasoning: Optional[str] = None,
-    account_equity: Optional[float] = None
+    account_equity: Optional[float] = None,
+    open_position_count: Optional[int] = None
 ):
-    """Send Shadow Mode trade open notification with reasoning."""
+    """Send Shadow Mode trade open notification with full reasoning and stats."""
     if not is_enabled():
         return
 
@@ -336,12 +333,18 @@ Entry: `${entry_price:,.2f}`"""
         start_msg += f"\nSL: `${stop_loss:,.2f}`"
     if take_profit:
         start_msg += f"\nTP: `${take_profit:,.2f}`"
-    if account_equity:
-        start_msg += f"\nEquity: `${account_equity:,.2f}`"
+    
+    # State section
+    if account_equity or open_position_count is not None:
+        start_msg += "\n\n📊 *State:*"
+        if account_equity:
+            start_msg += f"\nEquity: `${account_equity:,.2f}`"
+        if open_position_count is not None:
+            start_msg += f"\nOpen positions: `{open_position_count}`"
+
     if reasoning:
-        # Truncate reasoning for Telegram
-        short_reason = reasoning[:200] + "..." if len(reasoning) > 200 else reasoning
-        start_msg += f"\n\n📝 *Reasoning:*\n_{short_reason}_"
+        # Full reasoning display (Telegram limit is 4096, so we are safe unless massive)
+        start_msg += f"\n\n📝 *Reasoning:*\n_{reasoning}_"
         
     await send_message(start_msg)
 

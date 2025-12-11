@@ -163,6 +163,13 @@ class DSPyRepository:
             return account.current_equity if account else 0.0
 
     @staticmethod
+    def get_open_position_count() -> int:
+        """Count active shadow trades (pnl_usd is None)."""
+        with get_dspy_session() as session:
+            count = session.exec(select(ShadowTrade).where(ShadowTrade.pnl_usd == None)).all()
+            return len(count)
+
+    @staticmethod
     def update_account_after_trade(pnl: float, fees: float, slippage: float, is_winner: bool):
         """Update shadow account state after a trade closes."""
         with get_dspy_session() as session:
