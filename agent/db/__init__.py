@@ -8,3 +8,13 @@ from .repository import (
     ApprovalRepository,
     ExitPlanRepository
 )
+from .models import (
+    Trade,
+    ExitPlan,
+    Signal,
+    Approval,
+    AgentLog,
+    InferenceLog,
+    MarketMemory,
+    TradePattern
+)
