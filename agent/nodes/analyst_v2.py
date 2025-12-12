@@ -51,6 +51,39 @@ async def analyst_node(state: dict[str, Any], tools: list) -> dict[str, Any]:
     raw_positions = account_state.get("raw_positions", {})
     position = raw_positions.get(target_coin, {})
     
+    # Extract Open Orders for TP/SL fallback
+    open_orders = account_state.get("open_orders", [])
+    coin_orders = [o for o in open_orders if o.get("coin") == target_coin]
+    
+    # Simple heuristics for TP/SL from Open Orders
+    exchange_tp = None
+    exchange_sl = None
+    
+    if has_open_position and position:
+        entry_px = float(position.get("entryPx", 0))
+        is_long = float(position.get("szi", 0)) > 0
+        
+        for o in coin_orders:
+            # Assuming Reduce-Only orders are TP/SL
+            if o.get("reduceOnly", False):
+                # Price can be limitPx or triggerPx
+                px = float(o.get("limitPx", 0))
+                if px == 0: px = float(o.get("triggerPx", 0))
+                if px == 0: continue
+                
+                # Logic: SL is usually a trigger order, TP is usually a limit
+                # If trigger exists, likely SL.
+                if o.get("triggerCondition") and o.get("triggerCondition") != "N/A":
+                     exchange_sl = px
+                else:
+                    # Limit order: check price relative to entry
+                    if is_long:
+                        if px > entry_px: exchange_tp = px
+                        elif px < entry_px: exchange_sl = px # Limit stop?
+                    else: # Short
+                        if px < entry_px: exchange_tp = px
+                        elif px > entry_px: exchange_sl = px
+
     mode_str = f"MANAGING {position_direction}" if has_open_position else "SEEKING ENTRY"
     print(f"[Analyst v2] Starting analysis for {target_coin} | Mode: {mode_str}")
     
@@ -314,8 +347,8 @@ OUTPUT JSON:
                  "current_close": current_close,
                  "position_direction": position_direction,
                  "entry_price": active_trade.entry_price if (has_open_position and active_trade) else (float(position.get("entryPx", 0)) if has_open_position else None),
-                 "stop_loss": active_trade.stop_loss if (has_open_position and active_trade) else None,
-                 "take_profit": active_trade.take_profit if (has_open_position and active_trade) else None
+                 "stop_loss": active_trade.stop_loss if (has_open_position and active_trade) else exchange_sl,
+                 "take_profit": active_trade.take_profit if (has_open_position and active_trade) else exchange_tp
             }
         }
         

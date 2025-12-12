@@ -35,8 +35,25 @@ async def get_account_state(tools: list) -> dict:
         return {"error": "get_account_info tool not found"}
     
     try:
-        # Fetch raw state
+        # Fetch raw state and open orders
         raw_state = await info_tool.ainvoke({})
+        
+        # Parallel fetch open orders
+        open_orders = []
+        orders_tool = next((t for t in tools if t.name == "get_open_orders"), None)
+        if orders_tool:
+             try:
+                 raw_orders = await orders_tool.ainvoke({})
+                 # Parse MCP wrapper
+                 if isinstance(raw_orders, list) and len(raw_orders) > 0 and isinstance(raw_orders[0], dict) and "text" in raw_orders[0]:
+                     try:
+                         import json
+                         open_orders = json.loads(raw_orders[0]["text"])
+                     except: pass
+                 elif isinstance(raw_orders, list):
+                     open_orders = raw_orders
+             except Exception as oe:
+                 print(f"[Main] Failed to fetch open orders: {oe}")
         
         # Parse MCP/LangChain wrapped content
         if isinstance(raw_state, list) and len(raw_state) > 0 and isinstance(raw_state[0], dict) and "text" in raw_state[0]:
@@ -83,6 +100,7 @@ async def get_account_state(tools: list) -> dict:
             "open_symbols": [p.split(" ")[1] for p in active_positions], # Extract coin names
             "open_position_details": {pos.get("coin"): "LONG" if float(pos.get("szi", 0)) > 0 else "SHORT" for p in raw_state.get("assetPositions", []) for pos in [p.get("position", {})] if float(pos.get("szi", 0)) != 0},
             "raw_positions": {pos.get("coin"): pos for p in raw_state.get("assetPositions", []) for pos in [p.get("position", {})] if float(pos.get("szi", 0)) != 0},
+            "open_orders": open_orders,
             "risk_level": risk_level,
             "withdrawable": float(raw_state.get("withdrawable", 0))
         }
