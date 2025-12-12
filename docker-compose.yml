@@ -12,7 +12,7 @@ services:
     env_file:
       - agent/.env
     volumes:
-      - agent/.env:/app/.env
+      - ./agent/.env:/app/.env
     restart: always
     networks:
       - agent-network
