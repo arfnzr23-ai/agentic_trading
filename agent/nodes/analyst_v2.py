@@ -374,6 +374,7 @@ async def analyst_node(state: dict[str, Any], tools: list) -> dict[str, Any]:
     else:
         # --- SNIPER ENTRY GATEKEEPING ---
         # If no confluence, do not even ask LLM.
+        print(f"[DEBUG] Gatekeeper Check: Require={cfg.risk.require_confluence}, Confluence={confluence}")
         if cfg.risk.require_confluence and not confluence:
             print("[Analyst v2] 🛑 Sniper Gatekeeper: No confluence. Returning HOLD.")
             return {
