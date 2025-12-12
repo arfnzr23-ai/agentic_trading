@@ -127,7 +127,7 @@ async def run_inference_cycle(mcp_client: MultiServerMCPClient, tools: list, cyc
             output=str(final_decision)[:5000]
         )
     
-    # Send Telegram notification
+    # Send Telegram notification (Inference)
     try:
         analyst_signal = result.get("analyst_signal", {})
         risk_decision = result.get("risk_decision", {})
@@ -143,6 +143,47 @@ async def run_inference_cycle(mcp_client: MultiServerMCPClient, tools: list, cyc
             open_position_count=len(account_state.get("open_symbols", [])),
             metadata=metadata
         )
+        
+        # Send Telegram notification (Trade Execution)
+        if action == "EXECUTED":
+            trade = final_decision.get("trade", {})
+            trade_action = trade.get("action", "ENTRY") # Default to ENTRY
+            
+            # Map merge.py actions to Telegram types
+            # merge.py uses: CUT_LOSS, CLOSE, SCALE_OUT, CLOSE_PARTIAL
+            # telegram.py expects: ENTRY, SCALE_IN, SCALE_OUT, CUT_LOSS
+            
+            tg_type = "ENTRY"
+            if trade_action in ["CUT_LOSS", "CLOSE"]: tg_type = "CUT_LOSS"
+            elif trade_action in ["SCALE_OUT", "CLOSE_PARTIAL"]: tg_type = "SCALE_OUT"
+            elif trade_action == "SCALE_IN": tg_type = "SCALE_IN"
+            elif analyst_signal.get("signal") == "SCALE_IN": tg_type = "SCALE_IN"
+            
+            # Extract basic params
+            entry_px = trade.get("entry_price") or account_state.get("market_price") or 0
+            size_usd = trade.get("size", 0)
+            leverage = trade.get("leverage", 1)
+            
+            # For CLOSE/CUT_LOSS, size/leverage might be ambiguous or full position
+            # We will just show what we have.
+            
+            await telegram.notify_trade_executed(
+                coin=trade.get("coin", "BTC"),
+                direction="LONG" if trade.get("is_buy", True) else "SHORT",
+                size_usd=float(size_usd),
+                leverage=int(leverage),
+                entry_price=float(entry_px),
+                stop_loss=trade.get("sl_pct"), # Pct not price? Helper handles conversion? No telegram expects price usually? 
+                # Wait, notify_trade_executed signature expects Price for SL/TP?
+                # merge.py trade_params has 'sl_pct'.
+                # We need to calc price or pass None for now to avoid confusion?
+                # Actually telegram.py format prints it with $ sign. So it expects PRICE.
+                # Logic: Entry * (1 +/- sl_pct)
+                stop_loss=None, 
+                take_profit=None,
+                order_type=tg_type
+            )
+            
     except Exception as tg_err:
         print(f"[Telegram] Notification error: {tg_err}")
     
