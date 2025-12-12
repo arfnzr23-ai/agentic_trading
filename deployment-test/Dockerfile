@@ -7,6 +7,9 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
 # Set the working directory in the container
 WORKDIR /app
 
+# Install curl for healthcheck
+RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
+
 # Copy the project files
 COPY deployment-test/pyproject.toml .
 COPY requirements.txt .

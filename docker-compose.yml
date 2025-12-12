@@ -13,9 +13,15 @@ services:
       - agent/.env
     volumes:
       - ./agent/.env:/app/.env
-    restart: always
+    restart: unless-stopped
     networks:
       - agent-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   # ---------------------------------------------------------------------------
   # 2. Trading Agent - Analyzes market and executes trades
@@ -34,9 +40,10 @@ services:
       - PYTHONUNBUFFERED=1
     volumes:
       - agent_data:/data
-    restart: always
+    restart: unless-stopped
     depends_on:
-      - mcp-server
+      mcp-server:
+        condition: service_healthy
     networks:
       - agent-network
 
