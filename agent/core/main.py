@@ -146,9 +146,9 @@ async def run_inference_cycle(mcp_client: MultiServerMCPClient, tools: list, cyc
     except Exception as tg_err:
         print(f"[Telegram] Notification error: {tg_err}")
     
-    # --- SHADOW MODE INJECTION ---
+    # --- SHADOW MODE INJECTION (DISABLED) ---
     # Run DSPy Shadow Agent in background using the *exact same* data from this cycle
-    asyncio.create_task(run_shadow_cycle(result, tools))
+    # asyncio.create_task(run_shadow_cycle(result, tools))
     
     return result
 
