@@ -10,9 +10,9 @@ services:
     ports:
       - "127.0.0.1:8000:8000" # Localhost only for security
     env_file:
-      - .env
+      - agent/.env
     volumes:
-      - .env:/app/.env
+      - agent/.env:/app/.env
     restart: always
     networks:
       - agent-network
@@ -26,7 +26,7 @@ services:
       dockerfile: Dockerfile.agent
     command: python -m agent.core.main
     env_file:
-      - .env
+      - agent/.env
     environment:
       - MCP_SERVER_URL=http://mcp-server:8000/sse
       - DATABASE_URL=sqlite:////data/agent.db
@@ -52,7 +52,7 @@ services:
     ports:
       - "8501:8501"
     env_file:
-      - .env
+      - agent/.env
     environment:
       - DATABASE_URL=sqlite:////data/agent.db
       - DSPY_DATABASE_URL=sqlite:////data/dspy_memory.db
