@@ -191,3 +191,38 @@ If your VPS does not have Docker installed, follow these commands:
     sudo usermod -aG docker $USER
     newgrp docker
     ```
+
+## 5. Public Dashboard Access (No SSH needed)
+
+To access the dashboard directly via IP (e.g., `http://YOUR_VPS_IP:8501`), follow these steps:
+
+### 1. Start the Dashboard
+
+The dashboard is behind a Docker profile. You must start it explicitly:
+
+```bash
+docker compose --profile dashboard up -d --build
+```
+
+### 2. Configure Firewall
+
+**If `sudo ufw status` says "Status: inactive":**
+
+- This means your VPS allows all traffic internally.
+- You should be able to access the link immediately **UNLESS** your Cloud Provider (AWS, Azure, DigitalOcean, etc.) blocks it externally.
+- **Action:** Go to your Cloud Provider's Web Console → Networking/Firewall → Add Inbound Rule for TCP Port 8501.
+
+**If `sudo ufw status` says "Status: active":**
+
+- You must allow the port:
+
+```bash
+sudo ufw allow 8501/tcp
+sudo ufw reload
+```
+
+### 3. Verify Access
+
+Open `http://<YOUR_VPS_IP>:8501` in your browser.
+
+> [!WARNING] > **Security Notice**: This exposes your dashboard (and database download) to the entire internet. Using the SSH tunnel method described in `persistent_deployment.md` is significantly more secure.
