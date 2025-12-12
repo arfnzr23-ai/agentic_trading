@@ -9,77 +9,136 @@ import time
 from typing import Any
 
 
-async def fetch_analyst_data(tools: list, coin: str, timestamps: dict) -> dict:
+# Global Cache
+# Structure: {key: {"data": data, "timestamp": ms}}
+_MARKET_CACHE = {}
+_LAST_PRICE_CHECK = {"price": 0.0, "time": 0}
+
+async def fetch_analyst_data(tools: list, coin: str, timestamps: dict, wallet_address: str) -> dict:
     """
-    Fetch all data for analyst in parallel.
-    
-    Args:
-        tools: List of MCP tool objects
-        coin: Trading coin (e.g., "BTC")
-        timestamps: Dict with start_5m, start_4h, current_ms
-        
-    Returns:
-        dict with market_context, candles_5m, candles_4h, account_health
+    Fetch all data for analyst using Server-Side Aggregator (Phase 6).
     """
     tool_map = {t.name: t for t in tools}
     
-    # Define all fetches
-    tasks = {
-        "market_context": _call_tool(
-            tool_map.get("get_market_context"),
-            {"coin": coin}
-        ),
-        "candles_5m": _call_tool(
-            tool_map.get("get_candles"),
-            {
-                "coin": coin,
-                "interval": "5m",
-                "start_time": timestamps["start_5m"],
-                "end_time": timestamps["current_ms"]
-            }
-        ),
-        "candles_1h": _call_tool(
-            tool_map.get("get_candles"),
-            {
-                "coin": coin,
-                "interval": "1h",
-                "start_time": timestamps["start_1h"],
-                "end_time": timestamps["current_ms"]
-            }
-        ),
-        "candles_4h": _call_tool(
-            tool_map.get("get_candles"),
-            {
-                "coin": coin,
-                "interval": "4h",
-                "start_time": timestamps["start_4h"],
-                "end_time": timestamps["current_ms"]
-            }
-        ),
-        "candles_1d": _call_tool(
-            tool_map.get("get_candles"),
-            {
-                "coin": coin,
-                "interval": "1d",
-                "start_time": timestamps["start_1d"],
-                "end_time": timestamps["current_ms"]
-            }
-        ),
-        "account_health": _call_tool(
-            tool_map.get("get_account_health"),
-            {}
-        ),
-    }
-    
-    # Execute all in parallel
+    # 1. Single Aggregator Call
+    print(f"[DataFetcher] Fetching full context for {coin}...")
     start = time.time()
-    results = await asyncio.gather(*tasks.values(), return_exceptions=True)
+    
+    # Call the new "Mega-Tool"
+    raw_data = await _call_tool(
+        tool_map.get("get_agent_full_context"), 
+        {"coin": coin, "address": wallet_address}
+    )
+    
     elapsed = (time.time() - start) * 1000
+    print(f"[DataFetcher] Aggregated Fetch completed in {elapsed:.0f}ms")
     
-    print(f"[DataFetcher] Parallel fetch completed in {elapsed:.0f}ms")
+    if isinstance(raw_data, str):
+        print(f"[DataFetcher] DEBUG RAW DATA TYPE: {type(raw_data)}")
+        print(f"[DataFetcher] DEBUG RAW DATA (First 500 chars): {raw_data[:500]}")
+        if "Error" in raw_data:
+            print(f"[DataFetcher] Critical Error: {raw_data}")
+            return {}
+        # Try one last parse if it's a valid stringified dict that _call_tool missed?
+        # But for now let's just see what it is.
+
+
+    # 2. Unpack & Normalize Results
+    final_results = {}
     
-    # Map results back to keys
-    return dict(zip(tasks.keys(), results))
+    if isinstance(raw_data, dict):
+        # Happy Path
+        final_results["market_context"] = raw_data.get("market_context", {})
+        final_results["candles_1m"] = raw_data.get("candles_1m", [])
+        final_results["candles_5m"] = raw_data.get("candles_5m", [])
+        final_results["candles_1h"] = raw_data.get("candles_1h", [])
+        final_results["candles_4h"] = raw_data.get("candles_4h", [])
+        final_results["candles_1d"] = raw_data.get("candles_1d", [])
+        final_results["user_fills"] = raw_data.get("user_fills", [])
+        final_results["open_orders"] = raw_data.get("open_orders", []) # Fix missing field
+        
+        user_state = raw_data.get("user_state", {})
+    else:
+        # Error Path (raw_data is str)
+        print(f"[DataFetcher] 🛑 AGGREGATOR ERROR: Expected dict, got {type(raw_data)}. Value: {str(raw_data)[:200]}")
+        final_results["market_context"] = {}
+        final_results["candles_1m"] = []
+        final_results["candles_5m"] = []
+        final_results["candles_1h"] = []
+        final_results["candles_4h"] = []
+        final_results["candles_1d"] = []
+        final_results["user_fills"] = []
+        final_results["open_orders"] = []
+        user_state = {}
+
+    # Map 'user_state' (raw HL response) to 'account_health' (Agent format)
+    # If the server returned 'account_health' directly in future, we'd use that.
+    # Currently server returns 'user_state'.
+    if user_state:
+        margin_summary = user_state.get("marginSummary", {})
+        final_results["account_health"] = {
+            "equity": float(margin_summary.get("accountValue", 0)),
+            "margin_used": float(margin_summary.get("totalMarginUsed", 0)),
+            "margin_available": float(margin_summary.get("totalNtlPos", 0)), # Approx
+            # Add other fields if needed by nodes
+        }
+        # Also expose raw state for risk node if needed
+        final_results["account_state"] = user_state
+        final_results["open_orders"] = raw_data.get("open_orders", [])
+    else:
+        final_results["account_health"] = "Error: No user state"
+
+    # 3. Volatility Check (Safety Valve)
+    # Use 1m candle for fastest check now
+    try:
+        c1m = final_results.get("candles_1m")
+        current_ms = timestamps["current_ms"]
+        current_price = 0.0
+        
+        if c1m and isinstance(c1m, list) and len(c1m) > 0:
+            last = c1m[-1]
+            # Handle potential MCP TextContent wrapper if server didn't clean it (server sent raw)
+            # But wait, server sent raw list from HL SDK -> HL SDK returns list of dicts.
+            # However, MCP transmission might stringify or wrap?
+            # FastMCP generally serializes JSON. So it should be dicts.
+            if isinstance(last, dict):
+                 current_price = float(last.get("c", 0))
+        
+        if current_price > 0:
+            _check_volatility(current_price, current_ms)
+            
+    except Exception as e:
+        print(f"[DataFetcher] Volatility check warning: {e}")
+
+    return final_results
+
+
+def _check_volatility(current_price: float, current_ms: int):
+    """
+    If price moves > 1% in 1 minute, invalidate all caches.
+    """
+    global _MARKET_CACHE, _LAST_PRICE_CHECK
+    
+    last_price = _LAST_PRICE_CHECK["price"]
+    last_time = _LAST_PRICE_CHECK["time"]
+    
+    # Initialize if empty
+    if last_price == 0:
+        _LAST_PRICE_CHECK = {"price": current_price, "time": current_ms}
+        return
+
+    # Check time delta (approx 1 min window)
+    if current_ms - last_time > 60 * 1000:
+        # Calculate move
+        pct_change = abs((current_price - last_price) / last_price) * 100
+        
+        if pct_change > 1.0:
+            print(f"[DataFetcher] ⚠️ High Volatility ({pct_change:.2f}%). Invalidating Cache.")
+            _MARKET_CACHE.clear()
+        
+        # Update checkpoint
+        _LAST_PRICE_CHECK = {"price": current_price, "time": current_ms}
+
 
 
 async def _call_tool(tool, args: dict) -> Any:
@@ -89,6 +148,30 @@ async def _call_tool(tool, args: dict) -> Any:
     
     try:
         result = await tool.ainvoke(args)
+        
+        # Unpack standard MCP/LangChain ToolMessage result
+        if isinstance(result, list):
+            # Check for TextContent objects (common in FastMCP/LangChain)
+            content_list = []
+            for item in result:
+                if hasattr(item, 'text'):
+                    content_list.append(item.text)
+                elif isinstance(item, dict) and "text" in item:
+                    content_list.append(item["text"])
+                elif isinstance(item, str):
+                    content_list.append(item)
+            
+            full_text = "".join(content_list)
+            
+            # Try to parse as JSON if it looks like it
+            if full_text.strip().startswith("{") or full_text.strip().startswith("["):
+                try:
+                    import json
+                    return json.loads(full_text)
+                except:
+                    return full_text
+            return full_text
+            
         return result
     except Exception as e:
         return f"Error: {str(e)}"
@@ -100,6 +183,7 @@ def calculate_timestamps() -> dict:
     
     return {
         "current_ms": current_ms,
+        "start_1m": current_ms - (120 * 60 * 1000),         # Last 2 hours of 1m candles
         "start_5m": current_ms - (50 * 5 * 60 * 1000),      # Last 50 5-min candles (~4h)
         "start_1h": current_ms - (48 * 60 * 60 * 1000),    # Last 48 1-hour candles (2 days)
         "start_4h": current_ms - (50 * 4 * 60 * 60 * 1000), # Last 50 4-hour candles (~8 days)

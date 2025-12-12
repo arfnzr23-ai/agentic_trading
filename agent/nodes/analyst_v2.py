@@ -25,6 +25,7 @@ from agent.utils.learning import get_learning_context
 from datetime import datetime
 from sqlmodel import select
 from agent.models.schemas import TradeSignal
+from agent.utils import chart_tools
 
 
 async def analyst_node(state: dict[str, Any], tools: list) -> dict[str, Any]:
@@ -126,62 +127,208 @@ async def analyst_node(state: dict[str, Any], tools: list) -> dict[str, Any]:
     # ===== PHASE 2: PARALLEL DATA FETCH =====
     phase2_start = time.time()
     timestamps = calculate_timestamps()
-    data = await fetch_analyst_data(tools, target_coin, timestamps)
     
-    # Fetch trade history learning (also async)
-    learning_context = await get_learning_context(tools)
+    # Create tasks for data and learning
+    task_data = fetch_analyst_data(tools, target_coin, timestamps, state.get("account_address", ""))
+    task_learning = get_learning_context(tools)
+    
+    # News Fetch (Daily/Volatility Trigger)
+    # Run in thread to avoid blocking loop (requests is synchronous)
+    from agent.services import news_fetcher
+    import asyncio
+    task_news = asyncio.to_thread(news_fetcher.fetch_macro_context, query="Summarize top 3 crypto market drivers today")
+    
+    # Execute all
+    data, learning_context, macro_context = await asyncio.gather(task_data, task_learning, task_news)
     
     phase2_time = (time.time() - phase2_start) * 1000
-    print(f"[Analyst v2] Phase 2 (Fetch + Learning): {phase2_time:.0f}ms")
+    print(f"[Analyst v2] Phase 2 (Fetch + Learning + News): {phase2_time:.0f}ms")
+    
+
     
     # Debug: check what we got
     candles_5m_raw = data.get("candles_5m", "")
-    
+    candles_1m_raw = data.get("candles_1m", "") # NEW
     candles_1h_raw = data.get("candles_1h", "")
     candles_4h_raw = data.get("candles_4h", "")
     candles_1d_raw = data.get("candles_1d", "")
     
-    # === ENRICH DATA FOR SHADOW MODE ===
-    # Extract current close price from most recent 5m candle
-    current_close = 0.0
-    try:
-        import json as _json
-        
-        # Helper to extract dict from various formats
-        def _extract_candle(c):
-            if isinstance(c, dict):
-                if "text" in c: # MCP TextContent
-                    try: return _json.loads(c["text"])
-                    except Exception: return {}
-                return c
-            elif isinstance(c, str):
-                try: return _json.loads(c)
-                except Exception: return {}
-            return {}
+    # Helper to clean candles
+    def _clean_candles(raw_data) -> list:
+        try:
+            import json as _json
+            if isinstance(raw_data, list):
+                # Check if it's a list of TextContent objects
+                cleaned = []
+                for c in raw_data:
+                    if isinstance(c, dict):
+                         if "text" in c:
+                             try: cleaned.append(_json.loads(c["text"]))
+                             except: continue
+                         else:
+                             cleaned.append(c)
+                return cleaned
+            elif isinstance(raw_data, str):
+                if raw_data.startswith('['):
+                    return _json.loads(raw_data)
+        except Exception:
+             return []
+        return []
 
-        if isinstance(candles_5m_raw, str) and candles_5m_raw.startswith('['):
-            candles_list = _json.loads(candles_5m_raw)
-            if candles_list:
-                last_candle = _extract_candle(candles_list[-1])
-                current_close = float(last_candle.get("c", 0))
-                
-        elif isinstance(candles_5m_raw, list) and len(candles_5m_raw) > 0:
-            last_candle = _extract_candle(candles_5m_raw[-1])
-            current_close = float(last_candle.get("c", 0))
-            
-    except Exception as price_err:
-        print(f"[Analyst v2] Price extraction error: {price_err}")
+    # Process Timeframes with TA-Lib
+    # Process Timeframes with TA-Lib
+    c5m_list = _clean_candles(candles_5m_raw)
+    c1m_list = _clean_candles(candles_1m_raw) # NEW
+    c1h_list = _clean_candles(candles_1h_raw)
+    c4h_list = _clean_candles(candles_4h_raw)
+    c1d_list = _clean_candles(candles_1d_raw)
     
-    # Add derived fields for Shadow Mode
+    # Calculate Indicators & Format Strings
+    # 5M (Scalp Context)
+    ind_5m = chart_tools.calculate_indicators(c5m_list, interval="5m")
+    candles_5m_summary = chart_tools.format_context_string(target_coin, "5m", ind_5m, c5m_list)
+
+    # 1M (Scalp Momentum)
+    # Simple formatting for 1M to keep context light (avoiding full indicators if not critical)
+    # Just need price action and Volume? Let's use standard tool for consistency.
+    ind_1m = chart_tools.calculate_indicators(c1m_list, interval="1m")
+    candles_1m_summary = chart_tools.format_context_string(target_coin, "1m", ind_1m, c1m_list)
+    
+    # 1H (Intraday Context)
+    ind_1h = chart_tools.calculate_indicators(c1h_list, interval="1h")
+    candles_1h_summary = chart_tools.format_context_string(target_coin, "1h", ind_1h, c1h_list)
+    
+    # 4H (Swing Context)
+    ind_4h = chart_tools.calculate_indicators(c4h_list, interval="4h")
+    candles_4h_summary = chart_tools.format_context_string(target_coin, "4h", ind_4h, c4h_list)
+    
+    # 1D (Macro Context)
+    ind_1d = chart_tools.calculate_indicators(c1d_list, interval="1d")
+    candles_1d_summary = chart_tools.format_context_string(target_coin, "1d", ind_1d, c1d_list)
+
+    # Shadow Mode Data Extraction (using the robust list)
+    current_close = 0.0
+    if c5m_list:
+        current_close = float(c5m_list[-1].get("c", 0))
+
+    # Process Recent Fills (Trade History)
+    user_fills_raw = data.get("user_fills", [])
+    user_fills_summary = "No recent trades found."
+    
+    try:
+        if isinstance(user_fills_raw, list):
+            # Handle potential TextContent wrappers
+            cleaned_fills = _clean_candles(user_fills_raw) # Re-use cleaner as it handles list of dicts/text
+            
+            # Filter for this coin
+            relevant_fills = [f for f in cleaned_fills if isinstance(f, dict) and f.get("coin") == target_coin]
+            # HL API 'side' is 'B' or 'A'. 'px', 'sz', 'time' (ms)
+            
+            if relevant_fills:
+                # Sort by time desc
+                relevant_fills.sort(key=lambda x: x.get("time", 0), reverse=True)
+                
+                fill_lines = []
+                for f in relevant_fills[:5]:
+                    side = "BUY" if f.get("side") == "B" else "SELL"
+                    px = float(f.get("px", 0))
+                    sz = float(f.get("sz", 0))
+                    ts = f.get("time", 0)
+                    
+                    # Time formatting
+                    try:
+                        dt = (time.time() * 1000 - ts) / 1000
+                        if dt < 3600: t_str = f"{dt/60:.0f}m ago"
+                        elif dt < 86400: t_str = f"{dt/3600:.1f}h ago"
+                        else: t_str = f"{dt/86400:.1f}d ago"
+                    except: t_str = "Unknown time"
+                    
+                    # PnL & Type
+                    pnl = float(f.get("closedPnl", 0))
+                    pnl_str = f" | PnL: ${pnl:+.2f}" if pnl != 0 else ""
+                    
+                    # Order Type (heuristic based on 'crossing')
+                    is_taker = f.get("crossing", True) 
+                    type_str = "Market" if is_taker else "Limit"
+                    
+                    fill_lines.append(f"- {side} ${px:,.2f} ({sz}) | {type_str}{pnl_str} | {t_str}")
+                
+                user_fills_summary = "\n".join(fill_lines)
+    except Exception as e:
+        user_fills_summary = f"Error parsing fills: {e}"
+
+    # ===== PHASE 2.5: SNIPER MODE GATEKEEPING & NERVOUS WATCHMAN =====
+    # Extract Trends via Regimes (VWAP-based, slower)
+    trend_1h = ind_1h.get("regime", "NEUTRAL")
+    trend_5m = ind_5m.get("regime", "NEUTRAL")
+    
+    # Primary Confluence: Regime Agreement (VWAP-based)
+    regime_confluence = (trend_1h == trend_5m) and (trend_1h != "NEUTRAL")
+    
+    # Alternative Confluence: EMA Cross Agreement (faster, catches momentum)
+    ema_1h = ind_1h.get("ema_cross", "NEUTRAL")
+    ema_5m = ind_5m.get("ema_cross", "NEUTRAL")
+    ema_confluence = (ema_1h == ema_5m) and (ema_1h != "NEUTRAL")
+    
+    # Combined: Either confluence qualifies (still disciplined, but responsive)
+    confluence = regime_confluence or ema_confluence
+    
+    confluence_source = "REGIME" if regime_confluence else ("EMA" if ema_confluence else "NONE")
+    print(f"[Analyst v2] Sniper Check: Regime({trend_1h}/{trend_5m}) EMA({ema_1h}/{ema_5m}) -> Confluence={confluence} via {confluence_source}")
+
+    if has_open_position:
+        # --- THE NERVOUS WATCHMAN (Active Management) ---
+        # 1. Thesis Validation: If confluence breaks, exit.
+        if not confluence:
+             print("[Analyst v2] 🔴 NERVOUS WATCHMAN: Confluence broken on open position. Signaling CLOSE.")
+             # Construct artificial signal to bypass LLM cost and enforce discipline
+             return {
+                 "analyst_signal": {
+                     "signal": "CLOSE",
+                     "confidence": 1.0,
+                     "reasoning": f"Nervous Watchman Triggered: 1H Trend ({trend_1h}) and 5m Trend ({trend_5m}) have diverged. Sniper Thesis Invalidated.",
+                     "coin": target_coin
+                 },
+                 "analyst_response": None,
+                 "analyst_metadata": {
+                     "mode": mode_str,
+                     "confluence": False,
+                     "current_close": current_close,
+                     "phase1_time_ms": phase1_time,
+                     "total_time_ms": phase1_time + phase2_time
+                 }
+             }
+        else:
+             print("[Analyst v2] 🟢 Nervous Watchman: Confluence holds. Proceeding to Analysis.")
+    else:
+        # --- SNIPER ENTRY GATEKEEPING ---
+        # If no confluence, do not even ask LLM.
+        if cfg.risk.require_confluence and not confluence:
+            print("[Analyst v2] 🛑 Sniper Gatekeeper: No confluence. Returning HOLD.")
+            return {
+                 "analyst_signal": {
+                     "signal": "HOLD",
+                     "confidence": 1.0,
+                     "reasoning": f"Sniper Gatekeeper: Market is chopping (1H={trend_1h}, 5m={trend_5m}). Waiting for Setup.",
+                     "coin": target_coin
+                 },
+                 "analyst_response": None,
+                 "analyst_metadata": {
+                     "mode": mode_str,
+                     "confluence": False,
+                     "current_close": current_close,
+                     "phase1_time_ms": phase1_time,
+                     "total_time_ms": phase1_time + phase2_time
+                 }
+            }
+
+    # ===== PHASE 3: SINGLE LLM ANALYSIS =====
+
+    # Add derived fields
     data["coin"] = target_coin
     data["close"] = current_close
     print(f"[Analyst v2] Current {target_coin} price: ${current_close:,.2f}")
-    
-    # Summarize candle data (show more candles for better analysis)
-    candles_5m_summary = summarize_candles(candles_5m_raw, max_candles=288)
-    candles_1h_summary = summarize_candles(candles_1h_raw, max_candles=168)
-    candles_4h_summary = summarize_candles(candles_4h_raw, max_candles=42)
-    candles_1d_summary = summarize_candles(candles_1d_raw, max_candles=7)
+    print(f"[Analyst v2] Context generated: {ind_5m.get('regime', 'N/A')}")
     
     # Show brief summary
     print(f"[Analyst v2] Timeframes: 5m/1h/4h/1d loaded")
@@ -245,6 +392,9 @@ Your trade thesis is in THOUGHT CONTINUITY below - REVIEW IT before deciding.
     data_context = f"""
 ## MULTI-TIMEFRAME STRUCTURE (Macro → Micro)
 
+### MACRO CONTEXT (News)
+{macro_context}
+
 ### 1D (Daily Trend - Big Picture)
 {candles_1d_summary}
 
@@ -255,10 +405,17 @@ Your trade thesis is in THOUGHT CONTINUITY below - REVIEW IT before deciding.
 {candles_1h_summary}
 
 ### 5M (Entry Timing)
+### 5M (Entry Timing)
 {candles_5m_summary}
+
+### 1M (Scalp Momentum)
+{candles_1m_summary}
 
 ### Market Microstructure
 {data.get("market_context", "N/A")}
+
+### RECENT TRADING ACTIVITY (Context)
+{user_fills_summary}
 
 ### Account
 {data.get("account_health", "N/A")}
@@ -354,7 +511,8 @@ OUTPUT JSON:
                  "take_profit": active_trade.take_profit if (has_open_position and active_trade) else exchange_tp,
                  "position_size": float(position.get("szi", 0)) if has_open_position else 0,
                  "liquidation_price": float(position.get("liquidationPx", 0)) if has_open_position and position.get("liquidationPx") else None,
-                 "margin_used": float(position.get("marginUsed", 0)) if has_open_position else 0
+                 "margin_used": float(position.get("marginUsed", 0)) if has_open_position else 0,
+                 "confluence": confluence  # Passed for Risk Node Sizing
             }
         }
         

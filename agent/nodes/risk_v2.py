@@ -29,6 +29,7 @@ async def risk_node(state: dict[str, Any], tools: list) -> dict[str, Any]:
     analyst_signal = state.get("analyst_signal") or {}
     memory_context = state.get("memory_context") or {}
     account_state = state.get("account_state") or {}
+    analyst_metadata = state.get("analyst_metadata") or {}
     
     signal_type = analyst_signal.get("signal", "HOLD")
     confidence = analyst_signal.get("confidence", 0)
@@ -38,7 +39,7 @@ async def risk_node(state: dict[str, Any], tools: list) -> dict[str, Any]:
     
     # Quick HOLD check - STRICT for ALL accounts
     # Require 60%+ confidence to trade (fees eat small wins)
-    min_confidence = 0.6
+    min_confidence = cfg.risk.min_confidence
     
     if signal_type == "HOLD" or confidence < min_confidence:
         print(f"[Risk v2] Decision: NO_TRADE (signal={signal_type}, conf={confidence:.0%}, min_required={min_confidence:.0%})")
@@ -78,39 +79,38 @@ Win Rate: {performance.get('win_rate', 0):.1f}%
 PnL: ${performance.get('total_pnl_usd', 0):.2f}
 """
 
-    # Determine mode and sizing
-    if equity < 50.0:
-        # LADDER MODE - AGGRESSIVE
-        leverage = 40  # MAX leverage for BTC
-        
-        # For micro accounts (<$10), enforce minimum $100 position
-        if equity < 10.0:
-            min_position = 100.0  # Minimum $100 notional
-            margin_needed = min_position / leverage  # $2 margin for $100 position
-            position_size = min_position
-        else:
-            # Use 90% of equity with max leverage
-            position_size = equity * leverage * 0.9
+    # Determine mode and sizing (SNIPER STRATEGY v5)
+    confluence = analyst_metadata.get("confluence", False)
+    is_sniper = confluence and (confidence >= cfg.risk.sniper_confidence)
+    
+    if is_sniper:
+        # SNIPER MODE - AGGRESSIVE SIZING, CONSERVATIVE ENTRY
+        leverage = cfg.risk.sniper_leverage # 30x
+        # Maximize growth: Use 90% of equity
+        notional_size = equity * leverage * 0.90
+        mode_str = "SNIPER MODE (Aggressive)"
         
         mode_prompt = f"""
-*** LADDER MODE (Equity ${equity:.2f}) - ULTRA AGGRESSIVE ***
-LEVERAGE: {leverage}x (MAX)
-POSITION SIZE: ${position_size:.2f} notional
-MARGIN USED: ${position_size/leverage:.2f}
+*** SNIPER MODE ACTIVATED ***
+- Condition: High Confidence ({confidence:.0%}) + Trade Confluence
+- LEVERAGE: {leverage}x
+- RECOMMENDED SIZE: ${notional_size:.2f} Notional
 
-CRITICAL: For micro accounts, we MUST use large positions to overcome fees.
-- Minimum position: $100 notional
-- This means using ${position_size/leverage:.2f} margin with {leverage}x leverage
-- Output size_usd as ${position_size/leverage:.2f} (the margin amount)
-
-Output your decision as JSON.
+STRATEGY: We are taking a calculated aggressive shot.
+- Objective: Grow small account safely by only betting big on perfect setups.
+- Stop Loss: MUST be tight (Recent Swing High/Low).
 """
     else:
-        # Normal mode
-        max_position = equity * cfg.max_position_pct
+        # STANDARD MODE - CONSERVATIVE
+        leverage = cfg.risk.default_leverage # 5x
+        notional_size = equity * cfg.risk.max_position_pct * leverage
+        mode_str = "Standard Mode"
+        
         mode_prompt = f"""
-Normal mode. Max position: ${max_position:.2f}
-Be conservative with sizing.
+Standard Mode.
+- Condition: Moderate Confidence or No Confluence
+- LEVERAGE: {leverage}x
+- RECOMMENDED SIZE: ${notional_size:.2f} Notional
 """
 
     system_prompt = get_risk_prompt() + mode_prompt

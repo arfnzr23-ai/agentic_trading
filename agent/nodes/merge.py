@@ -273,6 +273,40 @@ def _build_trade_params(analyst_signal: dict, risk_decision: dict, cfg, state: d
     elif size_usd < MIN_ORDER_SIZE:
         print(f"[Merge] Warning: Size ${size_usd:.2f} below min ${MIN_ORDER_SIZE}, but not bumping (Standard Mode)")
 
+    # --- SMART LIMIT CHASE LOGIC ---
+    # Calculate aggressive Limit price safely (Ask vs Bid)
+    # entry_price defaults to last Close if no market stats
+    smart_price = None
+    
+    try:
+        if state:
+             # Extract market context
+             snapshot = state.get("market_data_snapshot", {})
+             mkt = snapshot.get("market_context", {})
+             if isinstance(mkt, dict):
+                 # Try to get Orderbook top (fallback to mid/mark)
+                 ask = float(mkt.get("ask", 0))
+                 bid = float(mkt.get("bid", 0))
+                 
+                 # Fallback to Analyst Close if book empty
+                 if ask == 0: ask = float(snapshot.get("close", 0))
+                 if bid == 0: bid = float(snapshot.get("close", 0))
+                 
+                 if ask > 0 and bid > 0:
+                     # CHASE MARGIN: 0.05% (5 basis points)
+                     CHASE_BPS = 0.0005
+                     
+                     if is_buy:
+                         # Long: Buy at Ask + Chase (Aggressive Limit)
+                         smart_price = ask * (1 + CHASE_BPS)
+                     else:
+                         # Short: Sell at Bid - Chase
+                         smart_price = bid * (1 - CHASE_BPS)
+                     
+                     print(f"[Merge] Smart Limit Chase: {'LONG' if is_buy else 'SHORT'} @ ${smart_price:.2f} (Ref: ${ask if is_buy else bid:.2f})")
+    except Exception as e:
+        print(f"[Merge] Smart Price Calc Error: {e}")
+
     return {
         "coin": coin,
         "is_buy": is_buy,
@@ -280,7 +314,9 @@ def _build_trade_params(analyst_signal: dict, risk_decision: dict, cfg, state: d
         "size_type": "usd",
         "sl_pct": round(sl_pct, 4),
         "tp_pct": round(tp_pct, 4),
-        "leverage": leverage
+        "leverage": leverage,
+        "entry_price": smart_price, # Pass the calculated limit price
+        "order_type": "limit" # Explicitly request Limit
     }
 
 
@@ -333,8 +369,43 @@ async def _execute_trade(trade_params: dict, tools: list, state: dict) -> dict:
     if not place_order_tool:
         return {"success": False, "error": "place_smart_order tool not found"}
     
+
+    # Detect Atomic Flip Condition (Phase 6 Optimization)
     try:
-        # Call the tool
+        current_positions = state.get("account_state", {}).get("open_position_details", {})
+        current_side = current_positions.get(trade_params["coin"])
+        new_side = "LONG" if trade_params["is_buy"] else "SHORT"
+        
+        if current_side and current_side != new_side:
+            print(f"[Merge] ⚠️ FLIP DETECTED ({current_side} -> {new_side}). Attempting Atomic Reverse...")
+            reverse_tool = next((t for t in tools if t.name == "reverse_position"), None)
+            
+            if reverse_tool:
+                result = await reverse_tool.ainvoke({
+                    "coin": trade_params["coin"],
+                    "address": state.get("account_address", "") # Address needed for server tool
+                })
+                
+                # Check result
+                if isinstance(result, dict) and result.get("status") == "filled":
+                     async_logger.log(
+                         action_type="TOOL_CALL",
+                         node_name="merge",
+                         tool_name="reverse_position",
+                         input_args=json.dumps(trade_params),
+                         output=str(result)[:5000]
+                     )
+                     # Persist and return
+                     _save_trade_to_db(trade_params, state.get("analyst_signal", {}), state.get("risk_decision", {}), result)
+                     return {"success": True, "result": result, "method": "reverse_position"}
+            
+            print("[Merge] Reverse tool not found or failed, falling back to standard order.")
+            
+    except Exception as e:
+        print(f"[Merge] Reverse logic error: {e}")
+
+    # Call the tool
+
         result = await place_order_tool.ainvoke({
             "coin": trade_params["coin"],
             "is_buy": trade_params["is_buy"],
@@ -342,7 +413,9 @@ async def _execute_trade(trade_params: dict, tools: list, state: dict) -> dict:
             "size_type": trade_params["size_type"],
             "sl_pct": trade_params["sl_pct"],
             "tp_pct": trade_params["tp_pct"],
-            "leverage": trade_params["leverage"]
+            "leverage": trade_params["leverage"],
+            "price": trade_params.get("entry_price"),
+            "order_type": trade_params.get("order_type", "market")
         })
         
         # Check for error string return (FastMCP catches exceptions)

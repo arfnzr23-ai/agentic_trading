@@ -126,6 +126,10 @@ async def run_inference_cycle(mcp_client: MultiServerMCPClient, tools: list, cyc
     account_state = await get_account_state(tools)
     state["account_state"] = account_state
     
+    # Inject Wallet Address for MCP optimization
+    cfg = get_config()
+    state["account_address"] = cfg.wallet_address
+    
     print(f"  Account: Equity ${account_state.get('equity', 'N/A')}, "
           f"Margin {account_state.get('margin_usage_pct', 'N/A')}%")
     
@@ -255,6 +259,8 @@ async def main_loop():
             print(f"[INIT] Connected! {len(tools)} tools available.")
         except Exception as e:
             print(f"[INIT] Connection failed: {e}. Retrying in 5s...")
+            import traceback
+            traceback.print_exc()
             await asyncio.sleep(5)
     
     # List some tools

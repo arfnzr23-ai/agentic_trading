@@ -32,6 +32,13 @@ class RiskParams(BaseModel):
     max_concurrent_positions: int = Field(default=3, description="Maximum open positions")
     auto_approve_usd: float = Field(default=100.0, description="Auto-approve trades below this USD value")
     prefer_max_leverage: bool = Field(default=True, description="Use maximum leverage for profit optimization")
+    
+    # Sniper Mode Settings (Architecture v5)
+    sniper_leverage: int = Field(default=30, description="Leverage for high-conviction sniper trades")
+    default_leverage: int = Field(default=5, description="Leverage for standard conviction trades")
+    min_confidence: float = Field(default=0.6, description="Minimum confidence to trade")
+    sniper_confidence: float = Field(default=0.7, description="Confidence threshold for sniper mode")
+    require_confluence: bool = Field(default=True, description="Strictly require 1H/5M trend confluence")
 
 
 class AgentConfig(BaseModel):
@@ -46,7 +53,7 @@ class AgentConfig(BaseModel):
     risk_model: str = Field(default_factory=lambda: os.getenv("RISK_MODEL", "openai/gpt-4o"))
     
     # MCP Server
-    mcp_server_url: str = Field(default_factory=lambda: os.getenv("MCP_SERVER_URL", "http://localhost:8000/sse"))
+    mcp_server_url: str = Field(default_factory=lambda: os.getenv("MCP_SERVER_URL", "http://127.0.0.1:8000/sse"))
     
     # Telegram
     telegram_bot_token: str = Field(default_factory=lambda: os.getenv("TELEGRAM_BOT_TOKEN", ""))
@@ -54,6 +61,9 @@ class AgentConfig(BaseModel):
     
     # Database
     database_url: str = Field(default_factory=lambda: os.getenv("DATABASE_URL", "sqlite:///agent.db"))
+    
+    # Wallet
+    wallet_address: str = Field(default_factory=lambda: os.getenv("HL_WL") or os.getenv("AGENT_WALLET", ""))
     
     # Trading
     inference_interval_seconds: int = Field(default=180, description="3 minutes between inference cycles")
