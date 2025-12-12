@@ -274,7 +274,7 @@ async def analyst_node(state: dict[str, Any], tools: list) -> dict[str, Any]:
     confluence = regime_confluence or ema_confluence
     
     confluence_source = "REGIME" if regime_confluence else ("EMA" if ema_confluence else "NONE")
-    print(f"[Analyst v2] Sniper Check: Regime({trend_1h}/{trend_5m}) EMA({ema_1h}/{ema_5m}) -> Confluence={confluence} via {confluence_source}")
+    print(f"\n[Analyst v2] 💰 Current {target_coin} price: ${current_close:,.2f}")
 
     if has_open_position:
         # --- THE NERVOUS WATCHMAN (Active Management) ---
@@ -327,7 +327,7 @@ async def analyst_node(state: dict[str, Any], tools: list) -> dict[str, Any]:
     # Add derived fields
     data["coin"] = target_coin
     data["close"] = current_close
-    print(f"\n[Analyst v2] 💰 Current {target_coin} price: ${current_close:,.2f}")
+    # Price logged earlier in Phase 2.5
     print(f"[Analyst v2] Context generated: {ind_5m.get('regime', 'N/A')}")
     
     # Show brief summary
