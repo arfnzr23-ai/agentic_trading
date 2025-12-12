@@ -1425,4 +1425,25 @@ if __name__ == "__main__":
             port = int(sys.argv[i + 1])
     
     print(f"[MCP] Starting SSE server on {host}:{port}...", file=sys.stderr)
-    uvicorn.run(mcp.sse_app(), host=host, port=port)
+    
+    # STARTUP FIX: FastMCP doesn't expose /health by default on the SSE route.
+    # We must explicitly add it to the underlying Starlette app.
+    import uvicorn
+    from starlette.responses import JSONResponse
+    from starlette.routing import Route
+    
+    # Create the app instance
+    app = mcp.sse_app()
+    
+    # Define health check
+    async def health_check(request):
+        return JSONResponse({
+            "status": "ok", 
+            "uptime": int(time.time() - _SERVER_START_TIME)
+        })
+    
+    # Inject route
+    app.routes.append(Route("/health", health_check))
+    
+    # Run
+    uvicorn.run(app, host=host, port=port)
