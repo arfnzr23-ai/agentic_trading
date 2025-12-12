@@ -309,9 +309,9 @@ OUTPUT JSON:
                  "total_time_ms": int(total_time),
                  "current_close": current_close,
                  "position_direction": position_direction,
-                 "entry_price": active_trade.entry_price if has_open_position and active_trade else None,
-                 "stop_loss": active_trade.stop_loss if has_open_position and active_trade else None,
-                 "take_profit": active_trade.take_profit if has_open_position and active_trade else None
+                 "entry_price": active_trade.entry_price if (has_open_position and active_trade) else (float(position.get("entryPx", 0)) if has_open_position else None),
+                 "stop_loss": active_trade.stop_loss if (has_open_position and active_trade) else None,
+                 "take_profit": active_trade.take_profit if (has_open_position and active_trade) else None
             }
         }
         
