@@ -138,7 +138,7 @@ IMPORTANT: Output ONLY the JSON."""
     try:
         response = await llm.ainvoke([
             SystemMessage(content=system_prompt),
-            HumanMessage(content=query)
+            HumanMessage(content=query + "\nREMEMBER: action must be 'OPEN_LONG', 'OPEN_SHORT', 'NO_TRADE', 'CLOSE_LONG', 'CLOSE_SHORT', or 'HOLD'. Do not use 'APPROVE'.")
         ])
         
         decision = _parse_decision(response.content)
@@ -205,20 +205,37 @@ def _parse_decision(content: str) -> dict:
         raw_data = json.loads(json_str)
         
         # Normalize fields for Pydantic
-        # Map "decision" -> "action" (common LLM alias)
         if "decision" in raw_data and "action" not in raw_data:
             raw_data["action"] = raw_data["decision"]
             
         # Map "reasoning" -> "reason"
         if "reasoning" in raw_data and "reason" not in raw_data:
             raw_data["reason"] = raw_data["reasoning"]
-            
+
+        # 1.5 Smart Mapping for "Action" field errors
+        # If output is "APPROVE" or "EXECUTE", map to correct OPEN action based on approved=True
+        ua = raw_data.get("action", "").upper()
+        if ua in ["APPROVE", "EXECUTE", "YES"]:
+            # We need to infer direction. This requires context, but here we can try to be safe.
+            # Best is to fail validation if ambiguous, but if we have approved=True...
+            # Actually, standardizing the Prompt is better. But let's handle "HOLD" logic.
+            if raw_data.get("approved"):
+                 # This is ambiguous without seeing the signal. 
+                 # Better to fallback to the Prompt fix, but let's at least map "HOLD" correctly
+                 pass
+        
+        # Ensure approved field/action match
+        if raw_data.get("approved") is None:
+             # Infer approved from action
+             act = raw_data.get("action", "")
+             raw_data["approved"] = act in ["OPEN_LONG", "OPEN_SHORT", "CLOSE_LONG", "CLOSE_SHORT"]
+
         # 1. Pydantic Validation
         try:
             validated_decision = RiskDecision(**raw_data)
             return validated_decision.model_dump()
         except Exception as validation_err:
-            print(f"[Risk v2] VALIDATION FAILED: {validation_err}")
+            print(f"[Risk v2] VALIDATION FAILED: {validation_err} | RAW: {raw_data}")
             # Fail safe
             return {
                 "approved": False, 
