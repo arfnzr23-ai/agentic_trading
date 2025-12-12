@@ -196,7 +196,8 @@ async def notify_inference(
     analyst_signal: dict,
     risk_decision: dict,
     final_action: str,
-    open_position_count: int = 0
+    open_position_count: int = 0,
+    metadata: Optional[dict] = None
 ):
     """Send inference update to Telegram."""
     if not is_enabled():
@@ -205,7 +206,8 @@ async def notify_inference(
     message = format_inference_update(
         cycle, equity, margin_pct,
         analyst_signal, risk_decision, final_action,
-        open_position_count
+        open_position_count,
+        metadata
     )
     await send_message(message)
 
