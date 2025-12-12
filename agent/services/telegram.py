@@ -107,13 +107,20 @@ def format_inference_update(
          tp_val = metadata.get("take_profit")
          sl_val = metadata.get("stop_loss")
          
+         # Extra Details
+         size_val = metadata.get("position_size", 0)
+         liq_val = metadata.get("liquidation_price")
+         margin_val = metadata.get("margin_used", 0)
+         
          tp_str = f"${tp_val:,.2f}" if tp_val else "None"
          sl_str = f"${sl_val:,.2f}" if sl_val else "None"
+         liq_str = f"${liq_val:,.2f}" if liq_val else "None"
          
          emoji = "🟢" if position_direction == "LONG" else "🔴"
          msg += f"\n{emoji} *OPEN POSITION ({position_direction})*\n"
-         msg += f"Entry: `{entry_str}`\n"
+         msg += f"Entry: `{entry_str}` | Size: `{size_val}`\n"
          msg += f"TP: `{tp_str}` | SL: `{sl_str}`\n"
+         msg += f"Liq: `{liq_str}` | Margin: `${margin_val:.2f}`\n"
     
     # 4. Analysis
     conf_emoji = "🔥" if conf_pct > 70 else "🤔"

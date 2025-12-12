@@ -348,7 +348,10 @@ OUTPUT JSON:
                  "position_direction": position_direction,
                  "entry_price": active_trade.entry_price if (has_open_position and active_trade) else (float(position.get("entryPx", 0)) if has_open_position else None),
                  "stop_loss": active_trade.stop_loss if (has_open_position and active_trade) else exchange_sl,
-                 "take_profit": active_trade.take_profit if (has_open_position and active_trade) else exchange_tp
+                 "take_profit": active_trade.take_profit if (has_open_position and active_trade) else exchange_tp,
+                 "position_size": float(position.get("szi", 0)) if has_open_position else 0,
+                 "liquidation_price": float(position.get("liquidationPx", 0)) if has_open_position and position.get("liquidationPx") else None,
+                 "margin_used": float(position.get("marginUsed", 0)) if has_open_position else 0
             }
         }
         
